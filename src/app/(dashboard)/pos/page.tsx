@@ -75,17 +75,29 @@ export default function POSPage() {
     },
   });
 
-  // MUTATION BARU: Kirim data transaksi riil & kurangi stok di database
+  // SOLUSI LINT 1: Menyatukan rantaian kalkulasi keuangan ke dalam 1 useMemo tunggal
+  const { subtotal, tax, total } = useMemo(() => {
+    const sub = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0);
+    const tx = Math.round((sub - globalDiscount) * 0.11);
+    const tot = Math.max(0, sub - globalDiscount + tx);
+    return { subtotal: sub, tax: tx, total: tot };
+  }, [cart, globalDiscount]);
+
+  // 2. MUTATION: Kirim data transaksi riil & kurangi stok di database
   const checkoutMutation = useMutation({
-    mutationFn: async (variables: { invoice: string; method: string; cash: number }) => {
+    mutationFn: async (variables: { method: string; cash: number }) => {
+      // SOLUSI LINT 2: Memindahkan Date.now() ke dalam fungsi mutasi async agar komponen tetap murni (pure)
+      const generatedInvoice = `INV-${Date.now()}`;
+      
       const itemsPayload = cart.map((item) => ({
         product_id: item.id,
         qty: item.qty,
         subtotal: item.selling_price * item.qty,
       }));
 
-      const { data, error: rpcError } = await supabase.rpc("checkout_pos_transaction", {
-        p_invoice_number: variables.invoice,
+      // SOLUSI LINT 3: Menghapus variabel 'data' yang tidak pernah digunakan
+      const { error: rpcError } = await supabase.rpc("checkout_pos_transaction", {
+        p_invoice_number: generatedInvoice,
         p_total: total,
         p_payment_method: variables.method.toUpperCase(),
         p_discount: globalDiscount,
@@ -94,10 +106,9 @@ export default function POSPage() {
       });
 
       if (rpcError) throw rpcError;
-      return variables;
+      return { ...variables, invoice: generatedInvoice };
     },
     onSuccess: (variables) => {
-      // Segarkan data produk (agar stok terbaru langsung ter-render di etalase kasir)
       queryClient.invalidateQueries({ queryKey: ["pos-products"] });
       queryClient.invalidateQueries({ queryKey: ["manage-products"] });
 
@@ -135,7 +146,6 @@ export default function POSPage() {
     const existingInCart = cart.find((i) => i.id === product.id);
     const currentQty = existingInCart ? existingInCart.qty : 0;
 
-    // Proteksi Kasir: Mencegah penjualan melebihi batas stok gudang Supabase
     if (currentQty >= product.stock) {
       toast.error(`Stok tidak mencukupi! Batas maksimum produk ini adalah ${product.stock} pcs.`);
       return;
@@ -147,7 +157,6 @@ export default function POSPage() {
       }
       return [...prev, { id: product.id, name: product.name, selling_price: product.selling_price, qty: 1 }];
     });
-    toast.success(`${product.name} masuk keranjang`, { duration: 800 });
   };
 
   const removeItem = (id: string) => {
@@ -169,10 +178,6 @@ export default function POSPage() {
 
   const clearCart = () => setCart([]);
 
-  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0), [cart]);
-  const tax = useMemo(() => Math.round((subtotal - globalDiscount) * 0.11), [subtotal, globalDiscount]);
-  const total = useMemo(() => Math.max(0, subtotal - globalDiscount + tax), [subtotal, globalDiscount, tax]);
-
   const handleOpenPayment = () => {
     if (cart.length === 0) {
       toast.error("Keranjang belanja masih kosong.");
@@ -188,7 +193,6 @@ export default function POSPage() {
       return;
     }
     checkoutMutation.mutate({
-      invoice: `INV-${Date.now()}`,
       method: "cash",
       cash: cashAmount,
     });
@@ -196,7 +200,6 @@ export default function POSPage() {
 
   const handleProcessQrisPayment = () => {
     checkoutMutation.mutate({
-      invoice: `INV-${Date.now()}`,
       method: "qris",
       cash: total,
     });
