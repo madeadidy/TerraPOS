@@ -5,7 +5,7 @@ import Providers from "@/components/shared/providers";
 import Script from "next/script";
 
 export const metadata: Metadata = {
-  title: "POS Kasir Modern",
+  title: "TerraPOS",
   description: "Sistem Point of Sale Retail & UMKM",
 };
 

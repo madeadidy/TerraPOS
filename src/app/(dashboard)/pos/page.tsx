@@ -7,16 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import NextImage from "next/image"; // <-- Import resmi Next Image untuk optimasi LCP
-import { 
-  Search, 
-  ShoppingCart, 
-  Minus, 
-  Plus, 
-  Tag, 
-  Banknote, 
-  QrCode, 
-  Loader2 
-} from "lucide-react";
+import { Search, ShoppingCart, Minus, Plus, Tag, Banknote, QrCode, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface Product {
@@ -55,21 +46,21 @@ export default function POSPage() {
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "qris">("cash");
   const [cashAmount, setCashAmount] = useState(0);
-  
+
   // State modal dialog kontrol
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<TransactionReceipt | null>(null);
 
   // 1. FETCH DATA PRODUK ASLI DARI SUPABASE
-  const { data: products = [], isLoading, error } = useQuery<Product[]>({
+  const {
+    data: products = [],
+    isLoading,
+    error,
+  } = useQuery<Product[]>({
     queryKey: ["pos-products"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("products")
-        .select("id, name, sku, barcode, cost_price, selling_price, stock, category_id, categories(name), image_url")
-        .eq("is_deleted", false)
-        .order("name", { ascending: true });
+      const { data, error } = await supabase.from("products").select("id, name, sku, barcode, cost_price, selling_price, stock, category_id, categories(name), image_url").eq("is_deleted", false).order("name", { ascending: true });
       if (error) throw error;
       return data as unknown as Product[];
     },
@@ -77,11 +68,7 @@ export default function POSPage() {
 
   // FILTER PENCARIAN REAL-TIME
   const filteredProducts = useMemo(() => {
-    return products.filter((p) =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.sku && p.sku.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.barcode && p.barcode.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
+    return products.filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(searchQuery.toLowerCase())) || (p.barcode && p.barcode.toLowerCase().includes(searchQuery.toLowerCase())));
   }, [products, searchQuery]);
 
   // MANAJEMEN STATE KERANJANG BELANJA
@@ -129,7 +116,7 @@ export default function POSPage() {
       toast.error("Uang yang diterima kurang dari total tagihan.");
       return;
     }
-    
+
     setLastTransaction({
       invoiceNumber: `INV-${Date.now()}`,
       discount: globalDiscount,
@@ -137,7 +124,7 @@ export default function POSPage() {
       total,
       cashAmount,
       change: cashAmount - total,
-      items: cart.map((i) => ({ name: i.name, qty: i.qty, price: i.selling_price }))
+      items: cart.map((i) => ({ name: i.name, qty: i.qty, price: i.selling_price })),
     });
 
     setIsPayModalOpen(false);
@@ -155,7 +142,7 @@ export default function POSPage() {
       total,
       cashAmount: total,
       change: 0,
-      items: cart.map((i) => ({ name: i.name, qty: i.qty, price: i.selling_price }))
+      items: cart.map((i) => ({ name: i.name, qty: i.qty, price: i.selling_price })),
     });
 
     setIsPayModalOpen(false);
@@ -167,19 +154,17 @@ export default function POSPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col bg-[#fffdfa] md:flex-row font-sans antialiased overflow-hidden">
-      
       {/* KIRI: GRID KATALOG PRODUK BERFOTO */}
       <div className="flex flex-1 flex-col p-4 md:p-6 min-h-0 bg-[#fffdfa]">
-        
         {/* BILAH PENCARIAN PIL PUTIH */}
         <div className="relative mb-5 flex-shrink-0">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-          <Input 
-            type="text" 
-            placeholder="Cari produk berdasarkan nama, SKU, atau barcode..." 
-            value={searchQuery} 
-            onChange={(e) => setSearchQuery(e.target.value)} 
-            className="pl-11 h-11 rounded-full border-orange-100/40 bg-white text-xs shadow-sm focus-visible:ring-[#e37b56]/20 text-zinc-700 placeholder-zinc-400" 
+          <Input
+            type="text"
+            placeholder="Cari produk berdasarkan nama, SKU, atau barcode..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-11 h-11 rounded-full border-orange-100/40 bg-white text-xs shadow-sm focus-visible:ring-[#e37b56]/20 text-zinc-700 placeholder-zinc-400"
           />
         </div>
 
@@ -217,47 +202,37 @@ export default function POSPage() {
                   <div className="relative w-full h-32 bg-gradient-to-br from-orange-50/60 to-orange-100/20 flex items-center justify-center overflow-hidden border-b border-orange-100/10">
                     {product.image_url ? (
                       /* FIXED LINT: Menggunakan <NextImage /> bawaan Next.js dengan flag unoptimized agar kebal domain mapping */
-                      <NextImage 
-                        src={product.image_url} 
+                      <NextImage
+                        src={product.image_url}
                         alt={product.name}
                         width={280}
                         height={128}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         unoptimized
+                        priority // <-- Tambahkan baris ini untuk mempercepat LCP
                       />
                     ) : (
                       <div className="flex flex-col items-center gap-1 text-orange-200">
-                        <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center shadow-sm text-[#e37b56] font-bold text-sm">
-                          {product.name.charAt(0).toUpperCase()}
-                        </div>
+                        <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center shadow-sm text-[#e37b56] font-bold text-sm">{product.name.charAt(0).toUpperCase()}</div>
                         <span className="text-[9px] uppercase tracking-wider font-semibold opacity-70">No Photo</span>
                       </div>
                     )}
-                    
-                    <span className="absolute top-2 left-2 text-[9px] font-bold text-[#e37b56] bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full shadow-sm">
-                      {product.categories?.name || "Umum"}
-                    </span>
+
+                    <span className="absolute top-2 left-2 text-[9px] font-bold text-[#e37b56] bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full shadow-sm">{product.categories?.name || "Umum"}</span>
                   </div>
 
                   {/* KONTEN INFORMASI BAWAH FOTO */}
                   <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
-                    <h3 className="text-xs font-bold text-zinc-800 line-clamp-2 min-h-[32px] group-hover:text-[#e37b56] transition-colors">
-                      {product.name}
-                    </h3>
-                    
+                    <h3 className="text-xs font-bold text-zinc-800 line-clamp-2 min-h-[32px] group-hover:text-[#e37b56] transition-colors">{product.name}</h3>
+
                     <div className="flex justify-between items-end pt-1.5 border-t border-dashed border-orange-100/20">
                       <div className="min-w-0">
                         <p className="text-[9px] text-zinc-400">Harga Jual</p>
-                        <p className="text-xs font-bold font-mono text-emerald-600">
-                          Rp {Number(product.selling_price).toLocaleString("id-ID")}
-                        </p>
+                        <p className="text-xs font-bold font-mono text-emerald-600">Rp {Number(product.selling_price).toLocaleString("id-ID")}</p>
                       </div>
-                      <span className={`text-[9px] font-semibold whitespace-nowrap px-1.5 py-0.5 rounded ${product.stock < 5 ? "bg-red-50 text-red-500 font-bold animate-pulse" : "text-zinc-400"}`}>
-                        Stok: {product.stock}
-                      </span>
+                      <span className={`text-[9px] font-semibold whitespace-nowrap px-1.5 py-0.5 rounded ${product.stock < 5 ? "bg-red-50 text-red-500 font-bold animate-pulse" : "text-zinc-400"}`}>Stok: {product.stock}</span>
                     </div>
                   </div>
-
                 </div>
               ))}
             </div>
@@ -267,7 +242,6 @@ export default function POSPage() {
 
       {/* KANAN: PANEL SIDEBAR KERANJANG BELANJA */}
       <div className="w-full md:w-[400px] bg-white border border-orange-100/30 rounded-[2.5rem] p-5 shadow-lg flex flex-col h-[calc(100vh-6rem)] m-4 flex-shrink-0 overflow-hidden relative">
-        
         <div className="flex items-center justify-between pb-3 border-b border-orange-100/20 flex-shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="h-9 w-9 bg-orange-50 text-[#e37b56] flex items-center justify-center rounded-xl">
@@ -289,7 +263,11 @@ export default function POSPage() {
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center py-12 text-zinc-300 space-y-2">
               <ShoppingCart className="h-10 w-10 stroke-[1.2]" />
-              <p className="text-xs font-medium">Belum ada pesanan masuk.<br/>Klik menu produk di sisi kiri.</p>
+              <p className="text-xs font-medium">
+                Belum ada pesanan masuk.
+                <br />
+                Klik menu produk di sisi kiri.
+              </p>
             </div>
           ) : (
             cart.map((item) => (
@@ -318,17 +296,17 @@ export default function POSPage() {
             <span>Subtotal Item</span>
             <span className="font-mono font-medium">Rp {subtotal.toLocaleString("id-ID")}</span>
           </div>
-          
+
           <div className="flex items-center justify-between gap-4 px-0.5">
             <span className="text-xs text-zinc-500 flex items-center gap-1">
               <Tag className="h-3 w-3 text-orange-400" /> Diskon (Rp)
             </span>
-            <Input 
-              type="number" 
-              className="h-8 w-28 text-right text-xs rounded-full border-orange-100/40 bg-[#fffdfb] focus-visible:ring-[#e37b56]/20 font-mono" 
-              value={globalDiscount || ""} 
-              onChange={(e) => setGlobalDiscount(Number(e.target.value))} 
-              placeholder="0" 
+            <Input
+              type="number"
+              className="h-8 w-28 text-right text-xs rounded-full border-orange-100/40 bg-[#fffdfb] focus-visible:ring-[#e37b56]/20 font-mono"
+              value={globalDiscount || ""}
+              onChange={(e) => setGlobalDiscount(Number(e.target.value))}
+              placeholder="0"
             />
           </div>
 
@@ -342,7 +320,7 @@ export default function POSPage() {
             <span className="font-mono text-base text-[#e37b56]">Rp {total.toLocaleString("id-ID")}</span>
           </div>
 
-          <button 
+          <button
             onClick={handleOpenPayment}
             disabled={cart.length === 0}
             className="w-full bg-[#e37b56] hover:bg-[#d26c48] disabled:bg-zinc-100 disabled:text-zinc-400 text-white font-bold py-3.5 rounded-2xl shadow-md transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2"
@@ -351,7 +329,6 @@ export default function POSPage() {
             Bayar Sekarang
           </button>
         </div>
-
       </div>
 
       {/* MODAL DIALOG PEMBAYARAN */}
@@ -365,7 +342,7 @@ export default function POSPage() {
           </DialogHeader>
 
           <div className="grid grid-cols-2 gap-3 py-2">
-            <button 
+            <button
               type="button"
               className={`h-20 rounded-2xl border flex flex-col gap-1.5 items-center justify-center transition-all ${
                 paymentMethod === "cash" ? "bg-[#e37b56] border-[#e37b56] text-white shadow-sm" : "bg-white border-orange-100/30 text-zinc-600 hover:border-orange-200"
@@ -391,26 +368,21 @@ export default function POSPage() {
             <div className="mt-2 space-y-4 border-t pt-4 border-orange-100/10 text-xs">
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider pl-1">Uang Diterima (Rp)</label>
-                <Input 
-                  type="number" 
-                  placeholder="Masukkan nominal uang tunai..." 
-                  value={cashAmount || ""} 
-                  onChange={(e) => setCashAmount(Number(e.target.value))} 
-                  className="h-10 rounded-full border-orange-100/40 bg-[#fffdfb] font-mono px-4 focus-visible:ring-[#e37b56]/20 text-zinc-700" 
+                <Input
+                  type="number"
+                  placeholder="Masukkan nominal uang tunai..."
+                  value={cashAmount || ""}
+                  onChange={(e) => setCashAmount(Number(e.target.value))}
+                  className="h-10 rounded-full border-orange-100/40 bg-[#fffdfb] font-mono px-4 focus-visible:ring-[#e37b56]/20 text-zinc-700"
                 />
               </div>
 
               <div className="rounded-2xl bg-[#fffdfb] border border-orange-100/10 p-3 flex justify-between items-center">
                 <span className="text-zinc-500 font-medium">Kembalian:</span>
-                <span className={`font-bold font-mono text-sm ${cashAmount - total >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                  Rp {Math.max(0, cashAmount - total).toLocaleString("id-ID")}
-                </span>
+                <span className={`font-bold font-mono text-sm ${cashAmount - total >= 0 ? "text-emerald-600" : "text-red-500"}`}>Rp {Math.max(0, cashAmount - total).toLocaleString("id-ID")}</span>
               </div>
 
-              <button 
-                onClick={handleProcessCashPayment}
-                className="w-full bg-[#e37b56] hover:bg-[#d26c48] text-white font-bold py-3 rounded-2xl shadow-md text-xs transition-all"
-              >
+              <button onClick={handleProcessCashPayment} className="w-full bg-[#e37b56] hover:bg-[#d26c48] text-white font-bold py-3 rounded-2xl shadow-md text-xs transition-all">
                 Selesaikan Transaksi Tunai
               </button>
             </div>
@@ -431,7 +403,9 @@ export default function POSPage() {
                 <h3 className="font-bold text-xs uppercase tracking-wide">Toko Kasir Modern</h3>
                 <p className="text-zinc-400 text-[10px] mt-0.5">Jl. Pahlawan No. 123</p>
                 <p className="text-zinc-400 text-[9px] mt-2">No: {lastTransaction.invoiceNumber}</p>
-                <p className="text-zinc-400 text-[9px]">Tgl: {new Date().toLocaleDateString("id-ID")} • {new Date().toLocaleTimeString("id-ID")} WITA</p>
+                <p className="text-zinc-400 text-[9px]">
+                  Tgl: {new Date().toLocaleDateString("id-ID")} • {new Date().toLocaleTimeString("id-ID")} WITA
+                </p>
               </div>
 
               <div className="space-y-2 border-b border-dashed border-orange-100/30 pb-3">
@@ -486,7 +460,6 @@ export default function POSPage() {
           )}
         </DialogContent>
       </Dialog>
-
     </div>
   );
 }
