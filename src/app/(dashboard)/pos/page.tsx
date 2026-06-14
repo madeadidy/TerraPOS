@@ -7,16 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import NextImage from "next/image";
-import { 
-  Search, 
-  ShoppingCart, 
-  Minus, 
-  Plus, 
-  Tag, 
-  Banknote, 
-  QrCode, 
-  Loader2 
-} from "lucide-react";
+import { Search, ShoppingCart, Minus, Plus, Tag, Banknote, QrCode, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface Product {
@@ -56,20 +47,37 @@ export default function POSPage() {
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "qris">("cash");
   const [cashAmount, setCashAmount] = useState(0);
-  
+
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<TransactionReceipt | null>(null);
 
+  // Taruh di dalam fungsi POSPage() bersama state-state lainnya
+  React.useEffect(() => {
+    // Masukkan script Midtrans Sandbox Snap ke HTML
+    const snapScriptUrl = "https://app.sandbox.midtrans.com/snap/snap.js";
+    const clientKey = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || "";
+
+    const script = document.createElement("script");
+    script.src = snapScriptUrl;
+    script.setAttribute("data-client-key", clientKey);
+    script.async = true;
+
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
   // 1. FETCH DATA PRODUK ASLI DARI SUPABASE
-  const { data: products = [], isLoading, error } = useQuery<Product[]>({
+  const {
+    data: products = [],
+    isLoading,
+    error,
+  } = useQuery<Product[]>({
     queryKey: ["pos-products"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("products")
-        .select("id, name, sku, barcode, cost_price, selling_price, stock, category_id, categories(name), image_url")
-        .eq("is_deleted", false)
-        .order("name", { ascending: true });
+      const { data, error } = await supabase.from("products").select("id, name, sku, barcode, cost_price, selling_price, stock, category_id, categories(name), image_url").eq("is_deleted", false).order("name", { ascending: true });
       if (error) throw error;
       return data as unknown as Product[];
     },
@@ -85,19 +93,19 @@ export default function POSPage() {
 
   // 2. MUTATION: Kirim data transaksi riil & kurangi stok di database
   const checkoutMutation = useMutation({
-    mutationFn: async (variables: { method: string; cash: number }) => {
-      // SOLUSI LINT 2: Memindahkan Date.now() ke dalam fungsi mutasi async agar komponen tetap murni (pure)
-      const generatedInvoice = `INV-${Date.now()}`;
-      
+    mutationFn: async (variables: { method: string; cash: number; invoice?: string }) => {
+      // 🌟 JIKA ADA INVOICE DARI MIDTRANS, PAKAI ITU. JIKA TIDAK (CASH), BARU BUAT BARU.
+      const finalInvoice = variables.invoice || `INV-${Date.now()}`;
+
       const itemsPayload = cart.map((item) => ({
         product_id: item.id,
         qty: item.qty,
+        price: item.selling_price,
         subtotal: item.selling_price * item.qty,
       }));
 
-      // SOLUSI LINT 3: Menghapus variabel 'data' yang tidak pernah digunakan
       const { error: rpcError } = await supabase.rpc("checkout_pos_transaction", {
-        p_invoice_number: generatedInvoice,
+        p_invoice_number: finalInvoice,
         p_total: total,
         p_payment_method: variables.method.toUpperCase(),
         p_discount: globalDiscount,
@@ -106,11 +114,13 @@ export default function POSPage() {
       });
 
       if (rpcError) throw rpcError;
-      return { ...variables, invoice: generatedInvoice };
+      return { ...variables, invoice: finalInvoice };
     },
     onSuccess: (variables) => {
       queryClient.invalidateQueries({ queryKey: ["pos-products"] });
       queryClient.invalidateQueries({ queryKey: ["manage-products"] });
+
+      queryClient.invalidateQueries();
 
       setLastTransaction({
         invoiceNumber: variables.invoice,
@@ -129,17 +139,15 @@ export default function POSPage() {
       toast.success("Transaksi sukses tercatat ke database!");
     },
     onError: (err: unknown) => {
-      const errMsg = err instanceof Error ? err.message : "Gagal memproses transaksi.";
+      console.error("Detail Eror POS:", err);
+      const dbError = err as { message?: string; details?: string; hint?: string };
+      const errMsg = dbError?.message || dbError?.details || dbError?.hint || "Gagal memproses transaksi.";
       toast.error(`Eror Database: ${errMsg}`);
     },
   });
 
   const filteredProducts = useMemo(() => {
-    return products.filter((p) =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.sku && p.sku.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (p.barcode && p.barcode.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
+    return products.filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(searchQuery.toLowerCase())) || (p.barcode && p.barcode.toLowerCase().includes(searchQuery.toLowerCase())));
   }, [products, searchQuery]);
 
   const addItem = (product: Product) => {
@@ -198,26 +206,97 @@ export default function POSPage() {
     });
   };
 
-  const handleProcessQrisPayment = () => {
-    checkoutMutation.mutate({
-      method: "qris",
-      cash: total,
-    });
+  // Kontrak tipe data untuk parameter callback Midtrans Snap
+  interface SnapOptions {
+    onSuccess?: (result: unknown) => void;
+    onPending?: (result: unknown) => void;
+    onError?: (result: unknown) => void;
+    onClose?: () => void;
+  }
+
+  // Kontrak bayangan untuk Window object agar mengenali fungsi .snap.pay
+  interface MidtransSnapWindow {
+    snap: {
+      pay: (token: string, options: SnapOptions) => void;
+    };
+  }
+
+  const [isMidtransLoading, setIsMidtransLoading] = useState(false);
+
+  const handleProcessQrisPayment = async () => {
+    if (cart.length === 0 || isMidtransLoading) return;
+
+    const generatedInvoice = `INV-${Date.now()}`;
+
+    try {
+      setIsMidtransLoading(true);
+      toast.loading("Menghubungkan ke Midtrans...", { id: "midtrans-loading" });
+
+      const res = await fetch("/api/midtrans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoice: generatedInvoice, total: total }),
+      });
+
+      const data = (await res.json()) as { error?: string; token?: string };
+      toast.dismiss("midtrans-loading");
+
+      if (data.error) throw new Error(data.error);
+      if (!data.token) throw new Error("Token pembayaran tidak diterbitkan oleh server.");
+
+      // 🌟 SOLUSI AMAN: Jangan matikan state modal dulu agar siklus DOM Next.js stabil.
+      // Cukup paksa pointer-events body menjadi 'auto' agar iframe luar Midtrans bisa diklik bebas!
+      document.body.style.pointerEvents = "auto";
+
+      const midtransWindow = window as unknown as MidtransSnapWindow;
+
+      midtransWindow.snap.pay(data.token, {
+        onSuccess: () => {
+          setIsMidtransLoading(false);
+          setIsPayModalOpen(false); // Tutup modal di sini saat pembayaran tervalidasi sukses
+          toast.success("Pembayaran terverifikasi Midtrans!");
+
+          // Kirim invoice yang SAMA ke Supabase agar sinkron
+          checkoutMutation.mutate({
+            method: "qris",
+            cash: total,
+            invoice: generatedInvoice,
+          });
+        },
+        onPending: () => {
+          setIsMidtransLoading(false);
+          setIsPayModalOpen(false); // Tutup modal di sini jika statusnya pending
+          toast.info("Menunggu pembayaran QRIS dari pelanggan...");
+        },
+        onError: () => {
+          setIsMidtransLoading(false);
+          toast.error("Pembayaran QRIS gagal.");
+        },
+        onClose: () => {
+          setIsMidtransLoading(false);
+          toast.warning("Anda menutup jendela pembayaran Midtrans.");
+        },
+      });
+    } catch (err: unknown) {
+      setIsMidtransLoading(false);
+      toast.dismiss("midtrans-loading");
+      const errorMsg = err instanceof Error ? err.message : "Terjadi kesalahan koneksi gateway.";
+      toast.error(`Gagal memicu Midtrans: ${errorMsg}`);
+    }
   };
 
   return (
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col bg-[#fffdfa] md:flex-row font-sans antialiased overflow-hidden">
-      
       {/* KIRI: GRID KATALOG PRODUK */}
       <div className="flex flex-1 flex-col p-4 md:p-6 min-h-0 bg-[#fffdfa]">
         <div className="relative mb-5 flex-shrink-0">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-          <Input 
-            type="text" 
-            placeholder="Cari produk berdasarkan nama, SKU, atau barcode..." 
-            value={searchQuery} 
-            onChange={(e) => setSearchQuery(e.target.value)} 
-            className="pl-11 h-11 rounded-full border-orange-100/40 bg-white text-xs shadow-sm focus-visible:ring-[#e37b56]/20 text-zinc-700" 
+          <Input
+            type="text"
+            placeholder="Cari produk berdasarkan nama, SKU, atau barcode..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-11 h-11 rounded-full border-orange-100/40 bg-white text-xs shadow-sm focus-visible:ring-[#e37b56]/20 text-zinc-700"
           />
         </div>
 
@@ -241,48 +320,30 @@ export default function POSPage() {
                 <div
                   key={product.id}
                   className={`bg-white border rounded-[1.8rem] overflow-hidden shadow-sm flex flex-col justify-between transition-all group ${
-                    product.stock <= 0 
-                      ? "opacity-50 border-zinc-200 pointer-events-none" 
-                      : "cursor-pointer border-orange-100/30 hover:border-[#e37b56]/50 hover:scale-[1.01]"
+                    product.stock <= 0 ? "opacity-50 border-zinc-200 pointer-events-none" : "cursor-pointer border-orange-100/30 hover:border-[#e37b56]/50 hover:scale-[1.01]"
                   }`}
                   onClick={() => addItem(product)}
                 >
                   <div className="relative w-full h-32 bg-gradient-to-br from-orange-50/60 to-orange-100/20 flex items-center justify-center overflow-hidden border-b border-orange-100/10">
                     {product.image_url ? (
-                      <NextImage 
-                        src={product.image_url} 
-                        alt={product.name}
-                        width={280}
-                        height={128}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        unoptimized
-                        priority
-                      />
+                      <NextImage src={product.image_url} alt={product.name} width={280} height={128} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" unoptimized priority />
                     ) : (
                       <div className="flex flex-col items-center gap-1 text-orange-200">
-                        <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center shadow-sm text-[#e37b56] font-bold text-sm">
-                          {product.name.charAt(0).toUpperCase()}
-                        </div>
+                        <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center shadow-sm text-[#e37b56] font-bold text-sm">{product.name.charAt(0).toUpperCase()}</div>
                         <span className="text-[9px] uppercase tracking-wider font-semibold opacity-70">No Photo</span>
                       </div>
                     )}
-                    
-                    <span className="absolute top-2 left-2 text-[9px] font-bold text-[#e37b56] bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full shadow-sm">
-                      {product.categories?.name || "Umum"}
-                    </span>
+
+                    <span className="absolute top-2 left-2 text-[9px] font-bold text-[#e37b56] bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full shadow-sm">{product.categories?.name || "Umum"}</span>
                   </div>
 
                   <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
-                    <h3 className="text-xs font-bold text-zinc-800 line-clamp-2 min-h-[32px] group-hover:text-[#e37b56] transition-colors">
-                      {product.name}
-                    </h3>
-                    
+                    <h3 className="text-xs font-bold text-zinc-800 line-clamp-2 min-h-[32px] group-hover:text-[#e37b56] transition-colors">{product.name}</h3>
+
                     <div className="flex justify-between items-end pt-1.5 border-t border-dashed border-orange-100/20">
                       <div className="min-w-0">
                         <p className="text-[9px] text-zinc-400">Harga Jual</p>
-                        <p className="text-xs font-bold font-mono text-emerald-600">
-                          Rp {Number(product.selling_price).toLocaleString("id-ID")}
-                        </p>
+                        <p className="text-xs font-bold font-mono text-emerald-600">Rp {Number(product.selling_price).toLocaleString("id-ID")}</p>
                       </div>
                       <span className={`text-[9px] font-semibold whitespace-nowrap px-1.5 py-0.5 rounded ${product.stock < 5 ? "bg-red-50 text-red-500 font-bold" : "text-zinc-400"}`}>
                         {product.stock <= 0 ? "Habis" : `Stok: ${product.stock}`}
@@ -319,7 +380,11 @@ export default function POSPage() {
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center py-12 text-zinc-300 space-y-2">
               <ShoppingCart className="h-10 w-10 stroke-[1.2]" />
-              <p className="text-xs font-medium">Belum ada pesanan masuk.<br/>Klik menu produk di sisi kiri.</p>
+              <p className="text-xs font-medium">
+                Belum ada pesanan masuk.
+                <br />
+                Klik menu produk di sisi kiri.
+              </p>
             </div>
           ) : (
             cart.map((item) => (
@@ -348,18 +413,12 @@ export default function POSPage() {
             <span>Subtotal Item</span>
             <span className="font-mono font-medium">Rp {subtotal.toLocaleString("id-ID")}</span>
           </div>
-          
+
           <div className="flex items-center justify-between gap-4 px-0.5">
             <span className="text-xs text-zinc-500 flex items-center gap-1">
               <Tag className="h-3 w-3 text-orange-400" /> Diskon (Rp)
             </span>
-            <Input 
-              type="number" 
-              className="h-8 w-28 text-right text-xs rounded-full border-orange-100/40 bg-[#fffdfb] font-mono" 
-              value={globalDiscount || ""} 
-              onChange={(e) => setGlobalDiscount(Number(e.target.value))} 
-              placeholder="0" 
-            />
+            <Input type="number" className="h-8 w-28 text-right text-xs rounded-full border-orange-100/40 bg-[#fffdfb] font-mono" value={globalDiscount || ""} onChange={(e) => setGlobalDiscount(Number(e.target.value))} placeholder="0" />
           </div>
 
           <div className="flex justify-between text-xs text-zinc-500 px-0.5">
@@ -372,7 +431,7 @@ export default function POSPage() {
             <span className="font-mono text-base text-[#e37b56]">Rp {total.toLocaleString("id-ID")}</span>
           </div>
 
-          <button 
+          <button
             onClick={handleOpenPayment}
             disabled={cart.length === 0 || checkoutMutation.isPending}
             className="w-full bg-[#e37b56] hover:bg-[#d26c48] disabled:bg-zinc-100 disabled:text-zinc-400 text-white font-bold py-3.5 rounded-2xl shadow-md text-xs uppercase tracking-wider flex items-center justify-center gap-2"
@@ -394,7 +453,7 @@ export default function POSPage() {
           </DialogHeader>
 
           <div className="grid grid-cols-2 gap-3 py-2">
-            <button 
+            <button
               type="button"
               disabled={checkoutMutation.isPending}
               className={`h-20 rounded-2xl border flex flex-col gap-1.5 items-center justify-center transition-all ${
@@ -407,11 +466,13 @@ export default function POSPage() {
             </button>
             <button
               type="button"
-              disabled={checkoutMutation.isPending}
+              // 🌟 Tambahkan isMidtransLoading di sini agar tombol tidak bisa di-klik ganda
+              disabled={checkoutMutation.isPending || isMidtransLoading}
               className="h-20 rounded-2xl border bg-white border-orange-100/30 text-zinc-600 flex flex-col gap-1.5 items-center justify-center hover:border-orange-200"
               onClick={handleProcessQrisPayment}
             >
-              {checkoutMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin text-[#e37b56]" /> : <QrCode className="h-5 w-5" />}
+              {/* Render spinner loading jika Midtrans sedang bekerja */}
+              {checkoutMutation.isPending || isMidtransLoading ? <Loader2 className="h-5 w-5 animate-spin text-[#e37b56]" /> : <QrCode className="h-5 w-5" />}
               <span className="text-xs font-bold">QRIS Digital</span>
             </button>
           </div>
@@ -420,23 +481,21 @@ export default function POSPage() {
             <div className="mt-2 space-y-4 border-t pt-4 border-orange-100/10 text-xs">
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider pl-1">Uang Diterima (Rp)</label>
-                <Input 
-                  type="number" 
-                  placeholder="Masukkan nominal uang tunai..." 
-                  value={cashAmount || ""} 
-                  onChange={(e) => setCashAmount(Number(e.target.value))} 
-                  className="h-10 rounded-full border-orange-100/40 bg-[#fffdfb] font-mono px-4 text-zinc-700" 
+                <Input
+                  type="number"
+                  placeholder="Masukkan nominal uang tunai..."
+                  value={cashAmount || ""}
+                  onChange={(e) => setCashAmount(Number(e.target.value))}
+                  className="h-10 rounded-full border-orange-100/40 bg-[#fffdfb] font-mono px-4 text-zinc-700"
                 />
               </div>
 
               <div className="rounded-2xl bg-[#fffdfb] border border-orange-100/10 p-3 flex justify-between items-center">
                 <span className="text-zinc-500 font-medium">Kembalian:</span>
-                <span className={`font-bold font-mono text-sm ${cashAmount - total >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                  Rp {Math.max(0, cashAmount - total).toLocaleString("id-ID")}
-                </span>
+                <span className={`font-bold font-mono text-sm ${cashAmount - total >= 0 ? "text-emerald-600" : "text-red-500"}`}>Rp {Math.max(0, cashAmount - total).toLocaleString("id-ID")}</span>
               </div>
 
-              <button 
+              <button
                 onClick={handleProcessCashPayment}
                 disabled={checkoutMutation.isPending}
                 className="w-full bg-[#e37b56] hover:bg-[#d26c48] text-white font-bold py-3 rounded-2xl shadow-md text-xs flex items-center justify-center gap-2"
@@ -462,7 +521,9 @@ export default function POSPage() {
                 <h3 className="font-bold text-xs uppercase tracking-wide">Toko Kasir Modern</h3>
                 <p className="text-zinc-400 text-[10px] mt-0.5">Jl. Pahlawan No. 123</p>
                 <p className="text-zinc-400 text-[9px] mt-2">No: {lastTransaction.invoiceNumber}</p>
-                <p className="text-zinc-400 text-[9px]">Tgl: {new Date().toLocaleDateString("id-ID")} • {new Date().toLocaleTimeString("id-ID")} WITA</p>
+                <p className="text-zinc-400 text-[9px]">
+                  Tgl: {new Date().toLocaleDateString("id-ID")} • {new Date().toLocaleTimeString("id-ID")} WITA
+                </p>
               </div>
 
               <div className="space-y-2 border-b border-dashed border-orange-100/30 pb-3">
@@ -517,7 +578,6 @@ export default function POSPage() {
           )}
         </DialogContent>
       </Dialog>
-
     </div>
   );
 }

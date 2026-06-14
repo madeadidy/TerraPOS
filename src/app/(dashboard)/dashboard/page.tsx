@@ -26,7 +26,9 @@ export default function DashboardPage() {
   // Ambil nama profil dari Supabase Auth
   useEffect(() => {
     const getActiveProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (user) {
         const displayName = user.user_metadata?.full_name || user.email?.split("@")[0] || "Kasir Utama";
         setCashierName(displayName);
@@ -46,7 +48,8 @@ export default function DashboardPage() {
       const { data, error } = await supabase
         .from("transactions")
         .select("id, invoice_number, total, payment_method, payment_status, created_at")
-        .eq("payment_status", "paid")
+        // 🌟 GANTI BARIS INI: Menerima status 'paid' (data lama) DAN 'success' (data baru)
+        .in("payment_status", ["paid", "success"])
         .gte("created_at", startOfMonth.toISOString())
         .order("created_at", { ascending: false });
 
@@ -59,9 +62,7 @@ export default function DashboardPage() {
   const { data: txItems = [], isLoading: isItemsLoading } = useQuery<TransactionItem[]>({
     queryKey: ["dashboard-tx-items"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("transaction_items")
-        .select("qty, subtotal, products(name)");
+      const { data, error } = await supabase.from("transaction_items").select("qty, subtotal, products(name)");
 
       if (error) throw error;
       return data as unknown as TransactionItem[];
@@ -101,37 +102,31 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8 pb-6 font-sans">
-      
       {/* HEADER PANEL & KANAN ATAS NAMA USER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-800">Ringkasan Performa Toko</h1>
           <p className="text-xs text-zinc-400 mt-0.5">Pantau laporan penjualan harian dan statistik tokomu secara riil.</p>
         </div>
-        
+
         {/* WIDGET NAMA USER DI KANAN ATAS */}
         <div className="flex items-center gap-2.5 bg-[#fbf6f0] border border-orange-100/30 px-4 py-2 rounded-full self-end sm:self-auto shadow-sm">
           <div className="h-7 w-7 rounded-full bg-[#e37b56] text-white flex items-center justify-center">
             <User className="h-3.5 w-3.5" />
           </div>
-          <span className="text-xs font-bold text-zinc-700 capitalize truncate max-w-[160px]">
-            {cashierName}
-          </span>
+          <span className="text-xs font-bold text-zinc-700 capitalize truncate max-w-[160px]">{cashierName}</span>
         </div>
       </div>
 
       {/* 3 KARTU UTAMA: Tata Letak Horizontal Kiri-Kanan */}
       <div className="grid gap-4 md:grid-cols-3">
-        
         {/* KARTU 1: OMZET HARI INI */}
         <div className="bg-white border border-orange-100/30 p-5 rounded-[2rem] shadow-sm flex items-center gap-4">
           <div className="h-12 w-12 bg-[#e2f0f4] text-[#4a7a96] flex items-center justify-center rounded-2xl flex-shrink-0">
             <DollarSign className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold font-mono text-zinc-800 truncate">
-              Rp {stats.salesToday.toLocaleString("id-ID")}
-            </div>
+            <div className="text-xl font-bold font-mono text-zinc-800 truncate">Rp {stats.salesToday.toLocaleString("id-ID")}</div>
             <p className="text-[10px] text-zinc-400 font-medium mt-0.5">Omzet Hari Ini</p>
           </div>
         </div>
@@ -142,9 +137,7 @@ export default function DashboardPage() {
             <ShoppingBag className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold font-mono text-zinc-800 truncate">
-              {stats.countToday} Transaksi
-            </div>
+            <div className="text-xl font-bold font-mono text-zinc-800 truncate">{stats.countToday} Transaksi</div>
             <p className="text-[10px] text-zinc-400 font-medium mt-0.5">Transaksi Hari Ini</p>
           </div>
         </div>
@@ -155,18 +148,14 @@ export default function DashboardPage() {
             <TrendingUp className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold font-mono text-[#e37b56] truncate">
-              Rp {stats.salesThisMonth.toLocaleString("id-ID")}
-            </div>
+            <div className="text-xl font-bold font-mono text-[#e37b56] truncate">Rp {stats.salesThisMonth.toLocaleString("id-ID")}</div>
             <p className="text-[10px] text-zinc-400 font-medium mt-0.5">Omzet Bulan Ini</p>
           </div>
         </div>
-
       </div>
 
       {/* PANEL BAWAH: AKTIVITAS & PRODUK TERLARIS */}
       <div className="grid gap-6 md:grid-cols-2">
-        
         {/* KIRI: AKTIVITAS PENJUALAN */}
         <div className="bg-white border border-orange-100/20 rounded-[2rem] p-6 shadow-sm flex flex-col">
           <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4 pl-1">Aktivitas Penjualan Terbaru</h3>
@@ -210,10 +199,7 @@ export default function DashboardPage() {
                       <span className="text-[#e37b56] font-bold font-mono">{product.qty} Pcs</span>
                     </div>
                     <div className="w-full h-2 bg-orange-50 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#e37b56] rounded-full transition-all duration-500"
-                        style={{ width: `${percentage}%` }}
-                      />
+                      <div className="h-full bg-[#e37b56] rounded-full transition-all duration-500" style={{ width: `${percentage}%` }} />
                     </div>
                   </div>
                 );
@@ -221,7 +207,6 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-
       </div>
     </div>
   );
