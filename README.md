@@ -53,7 +53,7 @@ Jika Anda ingin menduplikasi proyek ini dan menjalankannya di komputer lokal, ik
 3. Konfigurasi Environment Variables (.env.local)
    Buat sebuah file bernama .env.local di akar direktori proyek, lalu isi dengan kunci API Supabase Anda:
    NEXT_PUBLIC_SUPABASE_URL=[https://id-projek-anda.supabase.co](https://id-projek-anda.supabase.co)
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=anon public
 
 4. Jalankan Server Dev
    Nyalakan server lokal Next.js:
