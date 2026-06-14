@@ -4,6 +4,10 @@ export async function POST(request: Request) {
   try {
     const { invoice, total } = (await request.json()) as { invoice: string; total: number };
 
+    // 🌟 KUNCI OTOMATISASI: Membaca domain asal secara dinamis (Lokal / Vercel)
+    const requestUrl = new URL(request.url);
+    const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`; // Menghasilkan http://localhost:3000 atau https://xxx.vercel.app
+
     const serverKey = process.env.MIDTRANS_SERVER_KEY || "";
     const encodedKey = Buffer.from(serverKey + ":").toString("base64");
 
@@ -13,6 +17,12 @@ export async function POST(request: Request) {
         gross_amount: total,
       },
       payment_type: ["gopay", "qris", "shopeepay"],
+      // 🌟 URL sekarang otomatis menyesuaikan diri tanpa di-hardcode lagi!
+      callbacks: {
+        finish: `${baseUrl}/pos`,
+        unfinish: `${baseUrl}/pos`,
+        error: `${baseUrl}/pos`
+      }
     };
 
     const response = await fetch("https://app.sandbox.midtrans.com/snap/v1/transactions", {
