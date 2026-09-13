@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import NextImage from "next/image"; // <-- Import resmi Next Image untuk optimasi LCP
+import NextImage from "next/image";
 import { Plus, Pencil, Trash2, Loader2, Package, Search, Barcode, Layers, AlertTriangle, Upload, ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -64,7 +64,7 @@ export default function ProdukPage() {
     stock: 0,
   });
 
-  // 1. FETCH DATA PRODUK ASLI
+  // 1. FETCH DATA PRODUK ASLI (Tersaring RLS per Tenant)
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ["manage-products"],
     queryFn: async () => {
@@ -79,7 +79,7 @@ export default function ProdukPage() {
     refetchOnMount: "always",
   });
 
-  // 2. FETCH DATA KATEGORI
+  // 2. FETCH DATA KATEGORI (Tersaring RLS per Tenant)
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["manage-categories"],
     queryFn: async () => {
@@ -120,9 +120,13 @@ export default function ProdukPage() {
     }
   };
 
-  // 3. MUTATION: TAMBAH / EDIT PRODUK + INTEGRASI FOTO
+  // 3. MUTATION: TAMBAH / EDIT PRODUK + INTEGRASI FOTO & USER_ID (SAAS READY)
   const saveMutation = useMutation({
     mutationFn: async () => {
+      // Ambil user ID aktif dari session Supabase untuk pengikatan data multi-tenant
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Sesi pengguna tidak ditemukan. Silakan login kembali.");
+
       let finalImageUrl = selectedProduct ? selectedProduct.image_url : null;
 
       if (imageFile) {
@@ -139,13 +143,19 @@ export default function ProdukPage() {
         stock: form.stock,
         category_id: form.category_id || null,
         image_url: finalImageUrl,
+        user_id: user.id, // 🌟 MENGIKAT PRODUK KE AKUN KASIR/TOKO YANG SEDANG LOGIN
       };
 
       if (selectedProduct) {
-        const { error } = await supabase.from("products").update(payload).eq("id", selectedProduct.id);
+        const { error } = await supabase
+          .from("products")
+          .update(payload)
+          .eq("id", selectedProduct.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("products").insert([payload]);
+        const { error } = await supabase
+          .from("products")
+          .insert([payload]);
         if (error) throw error;
       }
     },
@@ -302,8 +312,6 @@ export default function ProdukPage() {
               ) : (
                 filteredProducts.map((product) => (
                   <tr key={product.id} className="hover:bg-[#fffdfc]/60 transition-colors group">
-                    
-                    {/* FIXED LINT: Mengganti <img> dengan <NextImage /> bawaan Next.js */}
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
                         <div className="h-9 w-9 rounded-xl bg-orange-50 border border-orange-100/20 overflow-hidden flex items-center justify-center flex-shrink-0 relative">
@@ -385,8 +393,6 @@ export default function ProdukPage() {
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider pl-1">Foto Menu Produk</label>
               <div className="flex items-center gap-4 bg-[#fffdfb] border border-dashed border-orange-100/60 p-3.5 rounded-2xl">
-                
-                {/* FIXED LINT: Mengganti <img> dengan <NextImage /> bawaan Next.js */}
                 <div className="h-16 w-16 rounded-xl bg-orange-50/50 border border-orange-100/30 overflow-hidden flex items-center justify-center flex-shrink-0 relative">
                   {imagePreview ? (
                     <NextImage src={imagePreview} alt="Preview" width={64} height={64} className="h-full w-full object-cover" unoptimized />
@@ -471,7 +477,6 @@ export default function ProdukPage() {
 
             <div className="space-y-1">
               <h3 className="font-bold text-zinc-800 text-base">Hapus Produk Ini?</h3>
-              {/* FIXED LINT: Mengganti tanda petik mentah (") dengan entitas &ldquo; dan &rdquo; */}
               <p className="text-xs text-zinc-400 leading-relaxed px-2">
                 Tindakan ini akan menghapus <span className="font-bold text-zinc-700">&ldquo;{productToDelete.name}&rdquo;</span> dari daftar katalog aktif toko kasir.
               </p>

@@ -1,0 +1,47 @@
+const int led1 = 4; //green LED
+const int led2 = 5; //red LED
+const int echoPin = 2;
+const int trigPin = 3;
+const int buzzerPin = 6; // buzzer pin
+const int nThreshold = 30; //30 cm
+threshold
+long nDuration;
+long nDistance;
+
+
+void setup() 
+{
+  pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(buzzerPin, OUTPUT); // set buzzer pin as output
+  Serial.begin(9600);
+  Serial.println("Starting ultrasonic detector...");
+}
+void loop() {
+    
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, LOW);
+  nDuration = pulseIn(echoPin, HIGH);
+  nDistance = nDuration * (0.034 / 1);//
+  sound of speed 3.4 m/s
+  Serial.print(nDistance);
+  Serial.println(" cm");
+  if(nDistance < nThreshold) {
+    tone(buzzerPin, 2000); //
+   digitalWrite(led2, HIGH); // turn on red LED
+   delay(1000); // wait for 1 second
+   noTone(buzzerPin); //
+   delay(1000); // wait for 1 second
+   digitalWrite(led2, LOW); // turn off red LED
+  }
+  else{
+    digitalWrite(led1, HIGH); // turn on green LED
+    delay(1000); // wait for 1 second
+    digitalWrite(led1, LOW); // turn off green LED
+  }
+}
+
+    
