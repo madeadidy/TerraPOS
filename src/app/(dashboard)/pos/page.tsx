@@ -37,6 +37,7 @@ interface TransactionReceipt {
   total: number;
   cashAmount: number;
   change: number;
+  paymentMethod: string;
   items: Array<{ name: string; qty: number; price: number }>;
 }
 
@@ -52,9 +53,8 @@ export default function POSPage() {
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<TransactionReceipt | null>(null);
 
-  // Taruh di dalam fungsi POSPage() bersama state-state lainnya
+  // Script Midtrans Sandbox Snap
   React.useEffect(() => {
-    // Masukkan script Midtrans Sandbox Snap ke HTML
     const snapScriptUrl = "https://app.sandbox.midtrans.com/snap/snap.js";
     const clientKey = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || "";
 
@@ -69,6 +69,7 @@ export default function POSPage() {
       document.body.removeChild(script);
     };
   }, []);
+
   // 1. FETCH DATA PRODUK ASLI DARI SUPABASE
   const {
     data: products = [],
@@ -83,7 +84,7 @@ export default function POSPage() {
     },
   });
 
-  // SOLUSI LINT 1: Menyatukan rantaian kalkulasi keuangan ke dalam 1 useMemo tunggal
+  // Kalkulasi Keuangan
   const { subtotal, tax, total } = useMemo(() => {
     const sub = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0);
     const tx = Math.round((sub - globalDiscount) * 0.11);
@@ -91,10 +92,9 @@ export default function POSPage() {
     return { subtotal: sub, tax: tx, total: tot };
   }, [cart, globalDiscount]);
 
-  // 2. MUTATION: Kirim data transaksi riil & kurangi stok di database
+  // 2. MUTATION: Transaksi & Kurangi Stok
   const checkoutMutation = useMutation({
     mutationFn: async (variables: { method: string; cash: number; invoice?: string }) => {
-      // 🌟 JIKA ADA INVOICE DARI MIDTRANS, PAKAI ITU. JIKA TIDAK (CASH), BARU BUAT BARU.
       const finalInvoice = variables.invoice || `INV-${Date.now()}`;
 
       const itemsPayload = cart.map((item) => ({
@@ -119,7 +119,6 @@ export default function POSPage() {
     onSuccess: (variables) => {
       queryClient.invalidateQueries({ queryKey: ["pos-products"] });
       queryClient.invalidateQueries({ queryKey: ["manage-products"] });
-
       queryClient.invalidateQueries();
 
       setLastTransaction({
@@ -129,6 +128,7 @@ export default function POSPage() {
         total,
         cashAmount: variables.cash,
         change: variables.method === "cash" ? variables.cash - total : 0,
+        paymentMethod: variables.method.toUpperCase(),
         items: cart.map((i) => ({ name: i.name, qty: i.qty, price: i.selling_price })),
       });
 
@@ -206,7 +206,6 @@ export default function POSPage() {
     });
   };
 
-  // Kontrak tipe data untuk parameter callback Midtrans Snap
   interface SnapOptions {
     onSuccess?: (result: unknown) => void;
     onPending?: (result: unknown) => void;
@@ -214,7 +213,6 @@ export default function POSPage() {
     onClose?: () => void;
   }
 
-  // Kontrak bayangan untuk Window object agar mengenali fungsi .snap.pay
   interface MidtransSnapWindow {
     snap: {
       pay: (token: string, options: SnapOptions) => void;
@@ -244,19 +242,15 @@ export default function POSPage() {
       if (data.error) throw new Error(data.error);
       if (!data.token) throw new Error("Token pembayaran tidak diterbitkan oleh server.");
 
-      // 🌟 SOLUSI AMAN: Jangan matikan state modal dulu agar siklus DOM Next.js stabil.
-      // Cukup paksa pointer-events body menjadi 'auto' agar iframe luar Midtrans bisa diklik bebas!
       document.body.style.pointerEvents = "auto";
-
       const midtransWindow = window as unknown as MidtransSnapWindow;
 
       midtransWindow.snap.pay(data.token, {
         onSuccess: () => {
           setIsMidtransLoading(false);
-          setIsPayModalOpen(false); // Tutup modal di sini saat pembayaran tervalidasi sukses
+          setIsPayModalOpen(false);
           toast.success("Pembayaran terverifikasi Midtrans!");
 
-          // Kirim invoice yang SAMA ke Supabase agar sinkron
           checkoutMutation.mutate({
             method: "qris",
             cash: total,
@@ -265,7 +259,7 @@ export default function POSPage() {
         },
         onPending: () => {
           setIsMidtransLoading(false);
-          setIsPayModalOpen(false); // Tutup modal di sini jika statusnya pending
+          setIsPayModalOpen(false);
           toast.info("Menunggu pembayaran QRIS dari pelanggan...");
         },
         onError: () => {
@@ -287,6 +281,34 @@ export default function POSPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] w-full flex-col bg-[#fffdfa] md:flex-row font-sans antialiased overflow-hidden">
+      
+      {/* CSS KHUSUS PENCETAKAN STRUK (THERMAL PRINT 80MM) */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #printable-receipt, #printable-receipt * {
+            visibility: visible !important;
+          }
+          #printable-receipt {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 80mm !important;
+            margin: 0 !important;
+            padding: 8px !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            font-family: 'Courier New', Courier, monospace !important;
+          }
+          @page {
+            size: auto;
+            margin: 0mm;
+          }
+        }
+      `}</style>
+
       {/* KIRI: GRID KATALOG PRODUK */}
       <div className="flex flex-1 flex-col p-4 md:p-6 min-h-0 bg-[#fffdfa]">
         <div className="relative mb-5 flex-shrink-0">
@@ -466,12 +488,10 @@ export default function POSPage() {
             </button>
             <button
               type="button"
-              // 🌟 Tambahkan isMidtransLoading di sini agar tombol tidak bisa di-klik ganda
               disabled={checkoutMutation.isPending || isMidtransLoading}
               className="h-20 rounded-2xl border bg-white border-orange-100/30 text-zinc-600 flex flex-col gap-1.5 items-center justify-center hover:border-orange-200"
               onClick={handleProcessQrisPayment}
             >
-              {/* Render spinner loading jika Midtrans sedang bekerja */}
               {checkoutMutation.isPending || isMidtransLoading ? <Loader2 className="h-5 w-5 animate-spin text-[#e37b56]" /> : <QrCode className="h-5 w-5" />}
               <span className="text-xs font-bold">QRIS Digital</span>
             </button>
@@ -508,7 +528,7 @@ export default function POSPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL STRUK DIGITAL */}
+      {/* MODAL STRUK DIGITAL (LAYAR WEB) */}
       <Dialog open={isReceiptModalOpen} onOpenChange={setIsReceiptModalOpen}>
         <DialogContent className="sm:max-w-sm bg-white border border-orange-100/30 rounded-[2.5rem] p-6 shadow-2xl text-zinc-800">
           <DialogHeader className="pb-1">
@@ -522,7 +542,7 @@ export default function POSPage() {
                 <p className="text-zinc-400 text-[10px] mt-0.5">Jl. Pahlawan No. 123</p>
                 <p className="text-zinc-400 text-[9px] mt-2">No: {lastTransaction.invoiceNumber}</p>
                 <p className="text-zinc-400 text-[9px]">
-                  Tgl: {new Date().toLocaleDateString("id-ID")} • {new Date().toLocaleTimeString("id-ID")} WITA
+                  Tgl: {new Date().toLocaleDateString("id-ID")} • {new Date().toLocaleTimeString("id-ID").slice(0, 5)} WIB
                 </p>
               </div>
 
@@ -557,7 +577,7 @@ export default function POSPage() {
 
               <div className="space-y-1.5 text-right text-zinc-500">
                 <div className="flex justify-between">
-                  <span>Jumlah Tunai:</span>
+                  <span>Bayar ({lastTransaction.paymentMethod}):</span>
                   <span>Rp {lastTransaction.cashAmount.toLocaleString("id-ID")}</span>
                 </div>
                 <div className="flex justify-between font-bold text-zinc-800">
@@ -566,7 +586,7 @@ export default function POSPage() {
                 </div>
               </div>
 
-              <div className="pt-3 flex gap-2 no-print">
+              <div className="pt-3 flex gap-2">
                 <Button variant="outline" className="flex-1 rounded-full border-orange-100/40 text-xs h-9 font-bold text-zinc-500" onClick={() => window.print()}>
                   Cetak Struk
                 </Button>
@@ -578,6 +598,79 @@ export default function POSPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ELEMEN KHUSUS PRINTER THERMAL (HANYA MUNCUL SAAT DI-PRINT) */}
+      {lastTransaction && (
+        <div id="printable-receipt" className="hidden print:block text-black font-mono text-xs">
+          <div className="text-center space-y-0.5 pb-2 border-b border-dashed border-black">
+            <h2 className="text-sm font-bold uppercase tracking-wider">KASIR MODERN</h2>
+            <p className="text-[10px]">Jl. Pahlawan No. 123</p>
+          </div>
+
+          <div className="py-2 border-b border-dashed border-black text-[10px] space-y-0.5">
+            <div className="flex justify-between">
+              <span>Faktur:</span>
+              <span className="font-bold">{lastTransaction.invoiceNumber}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Waktu:</span>
+              <span>{new Date().toLocaleDateString("id-ID")} {new Date().toLocaleTimeString("id-ID").slice(0, 5)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Metode:</span>
+              <span className="font-bold">{lastTransaction.paymentMethod}</span>
+            </div>
+          </div>
+
+          <div className="py-2 border-b border-dashed border-black space-y-1 text-[10px]">
+            {lastTransaction.items.map((item, idx) => (
+              <div key={idx} className="space-y-0.5">
+                <div className="font-bold">{item.name}</div>
+                <div className="flex justify-between pl-2">
+                  <span>{item.qty} x Rp {item.price.toLocaleString("id-ID")}</span>
+                  <span>Rp {(item.qty * item.price).toLocaleString("id-ID")}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="py-2 border-b border-dashed border-black text-[10px] space-y-0.5">
+            {lastTransaction.discount > 0 && (
+              <div className="flex justify-between">
+                <span>Diskon:</span>
+                <span>-Rp {lastTransaction.discount.toLocaleString("id-ID")}</span>
+              </div>
+            )}
+            {lastTransaction.tax > 0 && (
+              <div className="flex justify-between">
+                <span>Pajak (11%):</span>
+                <span>Rp {lastTransaction.tax.toLocaleString("id-ID")}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-xs pt-1 border-t border-dashed border-black">
+              <span>TOTAL:</span>
+              <span>Rp {lastTransaction.total.toLocaleString("id-ID")}</span>
+            </div>
+          </div>
+
+          <div className="py-2 border-b border-dashed border-black text-[10px] space-y-0.5">
+            <div className="flex justify-between">
+              <span>Bayar:</span>
+              <span>Rp {lastTransaction.cashAmount.toLocaleString("id-ID")}</span>
+            </div>
+            <div className="flex justify-between font-bold">
+              <span>Kembali:</span>
+              <span>Rp {lastTransaction.change.toLocaleString("id-ID")}</span>
+            </div>
+          </div>
+
+          <div className="text-center pt-3 space-y-0.5 text-[9px]">
+            <p className="font-bold">*** TERIMA KASIH ***</p>
+            <p>Barang yang sudah dibeli tidak dapat dikembalikan.</p>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
