@@ -5,6 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { DollarSign, ShoppingBag, TrendingUp, Loader2, ArrowUpRight, User } from "lucide-react";
 
+interface TransactionItem {
+  qty: number;
+  products: { name: string } | null;
+}
+
 interface Transaction {
   id: string;
   invoice_number: string;
@@ -12,12 +17,7 @@ interface Transaction {
   payment_method: string;
   payment_status: string;
   created_at: string;
-}
-
-interface TransactionItem {
-  qty: number;
-  subtotal: number;
-  products: { name: string } | null;
+  transaction_items: TransactionItem[];
 }
 
 export default function DashboardPage() {
@@ -37,7 +37,7 @@ export default function DashboardPage() {
     getActiveProfile();
   }, []);
 
-  // 1. FETCH TRANSAKSI
+  // 1. FETCH TRANSAKSI BERSAMA ITEM PENJUALANNYA (SINGLE RELATIONAL QUERY)
   const { data: transactions = [], isLoading: isTxLoading } = useQuery<Transaction[]>({
     queryKey: ["dashboard-transactions"],
     queryFn: async () => {
@@ -47,8 +47,18 @@ export default function DashboardPage() {
 
       const { data, error } = await supabase
         .from("transactions")
-        .select("id, invoice_number, total, payment_method, payment_status, created_at")
-        // 🌟 GANTI BARIS INI: Menerima status 'paid' (data lama) DAN 'success' (data baru)
+        .select(`
+          id, 
+          invoice_number, 
+          total, 
+          payment_method, 
+          payment_status, 
+          created_at,
+          transaction_items (
+            qty,
+            products ( name )
+          )
+        `)
         .in("payment_status", ["paid", "success"])
         .gte("created_at", startOfMonth.toISOString())
         .order("created_at", { ascending: false });
@@ -58,18 +68,7 @@ export default function DashboardPage() {
     },
   });
 
-  // 2. FETCH ITEM TRANSAKSI
-  const { data: txItems = [], isLoading: isItemsLoading } = useQuery<TransactionItem[]>({
-    queryKey: ["dashboard-tx-items"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("transaction_items").select("qty, subtotal, products(name)");
-
-      if (error) throw error;
-      return data as unknown as TransactionItem[];
-    },
-  });
-
-  // 3. KALKULASI DATA RIIL
+  // 2. KALKULASI DATA RIIL HARI INI & BULAN INI
   const stats = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const txToday = transactions.filter((tx) => tx.created_at.startsWith(todayStr));
@@ -77,10 +76,13 @@ export default function DashboardPage() {
     const salesThisMonth = transactions.reduce((sum, tx) => sum + Number(tx.total), 0);
     const countToday = txToday.length;
 
+    // Kalkulasi produk terlaris HANYA dari transaksi valid bulan ini
     const productMap: Record<string, number> = {};
-    txItems.forEach((item) => {
-      const name = item.products?.name || "Produk Dihapus";
-      productMap[name] = (productMap[name] || 0) + item.qty;
+    transactions.forEach((tx) => {
+      tx.transaction_items?.forEach((item) => {
+        const name = item.products?.name || "Produk Dihapus";
+        productMap[name] = (productMap[name] || 0) + item.qty;
+      });
     });
 
     const topProducts = Object.entries(productMap)
@@ -89,9 +91,9 @@ export default function DashboardPage() {
       .slice(0, 5);
 
     return { salesToday, salesThisMonth, countToday, topProducts };
-  }, [transactions, txItems]);
+  }, [transactions]);
 
-  if (isTxLoading || isItemsLoading) {
+  if (isTxLoading) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-zinc-400 py-20">
         <Loader2 className="h-6 w-6 animate-spin text-[#e37b56]" />
@@ -118,7 +120,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 3 KARTU UTAMA: Tata Letak Horizontal Kiri-Kanan */}
+      {/* 3 KARTU UTAMA */}
       <div className="grid gap-4 md:grid-cols-3">
         {/* KARTU 1: OMZET HARI INI */}
         <div className="bg-white border border-orange-100/30 p-5 rounded-[2rem] shadow-sm flex items-center gap-4">
@@ -181,9 +183,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* KANAN: 5 PRODUK TERLARIS */}
+        {/* KANAN: 5 PRODUK TERLARIS (LABEL & KUERI DIPERBAIKI) */}
         <div className="bg-white border border-orange-100/20 rounded-[2rem] p-6 shadow-sm">
-          <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-5 pl-1">Produk</h3>
+          <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-5 pl-1">Produk Terlaris (Bulan Ini)</h3>
           <div className="space-y-4">
             {stats.topProducts.length === 0 ? (
               <p className="text-center text-xs text-zinc-400 py-10">Belum ada produk terjual.</p>
