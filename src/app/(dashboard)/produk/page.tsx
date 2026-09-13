@@ -79,16 +79,29 @@ export default function ProdukPage() {
     refetchOnMount: "always",
   });
 
-  // 2. FETCH DATA KATEGORI (Tersaring RLS per Tenant)
+  // 2. FETCH DATA KATEGORI (DENGAN URUTAN KUSTOM)
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["manage-categories"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("categories")
-        .select("id, name")
-        .order("name", { ascending: true });
+        .select("id, name");
+        
       if (error) throw error;
-      return data as Category[];
+
+      // Urutan prioritas kategori yang diinginkan
+      const customOrder = ["Makanan", "Minuman", "Snack", "Lainnya"];
+
+      // Mengurutkan data berdasarkan daftar customOrder
+      return (data as Category[]).sort((a, b) => {
+        const indexA = customOrder.indexOf(a.name);
+        const indexB = customOrder.indexOf(b.name);
+
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      });
     },
   });
 
