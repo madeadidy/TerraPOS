@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const origin = requestUrl.origin;
 
   if (code) {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -17,20 +17,18 @@ export async function GET(request: Request) {
           get(name: string) {
             return cookieStore.get(name)?.value;
           },
-          set(name: string, value: string, options: any) {
+          set(name: string, value: string, options: Record<string, unknown>) {
             cookieStore.set({ name, value, ...options });
           },
-          remove(name: string, options: any) {
+          remove(name: string, options: Record<string, unknown>) {
             cookieStore.set({ name, value: "", ...options });
           },
         },
       }
     );
 
-    // Tukar kode autentikasi dengan session resmi Supabase
     await supabase.auth.exchangeCodeForSession(code);
   }
 
-  // Setelah sesi terbentuk, arahkan ke halaman pos
   return NextResponse.redirect(`${origin}/pos`);
 }
